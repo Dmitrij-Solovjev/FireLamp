@@ -1,19 +1,20 @@
-#include <Adafruit_NeoPixel.h>
-#include "colors.h"
-
-#define DB_PERLIN_IMPL
-#include "db_perlin.hpp"
-
+#ifndef EFFECTS
 #define EFFECTS
 
-#define PIXEL_PIN PA2                            // Пин для подключения адресных светодиодов
+#include <Adafruit_NeoPixel.h>
+#include "colors.h"
+#include "db_perlin.hpp"
+#include <SPI.h>
+#include <STM32FreeRTOS.h>
+
+//#define PIXEL_PIN PB6                            // Пин для подключения адресных светодиодов
+#ifndef LED_MATRIX_PIN
+    #define LED_MATRIX_PIN PB6                            // Пин для подключения адресных светодиодов
+#endif
+
 #define PIXEL_WIDTH 16                           // Ширина матрицы
 #define PIXEL_HEIGHT 16                          // Высота матрицы
 #define PIXEL_COUNT (PIXEL_WIDTH * PIXEL_HEIGHT) // Количество светодиодов
-#define BRIGHTNESS 25                            // Яркость по умолчанию
-#define COUNT_OF_EFFECTS 10                      // Количество эффектовы
-#define EFFECT_NUMBER_DEF 3                      // Эффект по умолчанию 3 - шум Перлина
-#define FRAME_RATE 60
 
 // С - коеффицент скорости
 // S - масштаб
@@ -32,11 +33,18 @@
 #define FOREST_C 0.000275
 #define FOREST_S 3
 
-/////////////////////////////////////////////////////////////////////////////////////////////
+enum effects_status
+{
+    off,
+    alarm,
+    on = 250
+};
 
 /////////////////////////////////////////////////////////////////////////////////////////////
 
-Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, NEO_GRB + NEO_KHZ800);
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+Adafruit_NeoPixel strip(PIXEL_COUNT, LED_MATRIX_PIN, NEO_GRB + NEO_KHZ800);
 
 class Effect
 {
@@ -47,6 +55,11 @@ protected:
     double speed_coeff = 0;
 
 public:
+    bool dimmable = true;
+    bool speed_variable = true;
+    bool scalable = true;
+    bool changable = true;
+
     Effect(double _speed_coeff = 0, uint8_t _scale = 0) : scale(_scale), speed_coeff(_speed_coeff)
     {
     }
@@ -119,7 +132,13 @@ class ColorALARM : public Effect
     uint8_t chanel = 0;
 
 public:
-    ColorALARM() : Effect() {}
+    ColorALARM() : Effect()
+    {
+        dimmable = false;
+        speed_variable = false;
+        scalable = false;
+        changable = false;
+    }
 
     void Draw() override
     {
@@ -145,6 +164,7 @@ public:
     {
         step = _scale * 256 / (speed + 1);
     }
+
     ~ColorALARM() {}
 };
 
@@ -389,7 +409,7 @@ class Fire : public Effect
     bool del_frame = false;
 
 public:
-    Fire(){};
+    Fire() {};
 
     uint32_t isqrt(uint32_t n)
     {
@@ -505,116 +525,104 @@ public:
 
 class Effects
 {
-    // Effect *effect[СOUNT_OF_EFFECTS] = {new Effect(), new Rainbow(), new Perlin(), new Sky(), new Lava(), new Ocean(), new Forest(), new Color()};
-    Effect *effect[COUNT_OF_EFFECTS] = {new Effect(), new Color(), new Rainbow(), new Clean_Perlin(), new Fire(), new Sky(), new Lava(), new Ocean(), new Forest(), new ColorALARM()};
-    uint8_t current_effect_number, backup_effect_number;
-    uint8_t brightness;
-    HardwareTimer *timer = nullptr;
-    // HardwareTimer timer(TIM1);
+    effects_status working_status = on;
+#define NUMBER_OF_EFFECTS 9
+    Effect *effect[NUMBER_OF_EFFECTS] = {
+        new ColorALARM(),
+        new Color(),
+        new Rainbow(),
+        new Clean_Perlin(),
+        new Fire(),
+        new Sky(),
+        new Lava(),
+        new Ocean(),
+        new Forest()};
+
+    uint8_t current_effect_number, backup_effect_number, brightness;
 
 public:
-    Effects(HardwareTimer *_timer)
+    Effects(size_t default_brightness = 25,
+            size_t effects_count = NUMBER_OF_EFFECTS,
+            size_t default_effect_number = 3) : brightness(default_brightness),
+                                                current_effect_number(default_effect_number)
     {
-        brightness = BRIGHTNESS;
+        pinMode(LED_MATRIX_PIN, OUTPUT);
         strip.setBrightness(brightness);
-        current_effect_number = EFFECT_NUMBER_DEF;
-        timer = _timer;
-        // timer = new HardwareTimer(TIM1);
-        // timer->attachInterrupt(this->Run()); // OnTimer1Interrupt);
-        this->Set_Up_Timer();
-    }
-
-    void Set_Up_Timer()
-    {
-        timer->pause();
-        timer->setPrescaleFactor(2560 * 21 / FRAME_RATE); // effect[current_effect_number]->Get_Speed()); // Set prescaler to 2560*21/1 => timer frequency = 168MHz/(2564*21)*1 = 3125 Hz (from prediv'd by 1 clocksource of 168 MHz)
-        timer->setOverflow(3125);                         // Set overflow to 3125 => timer frequency = 3125*FREQ_HZ Hz / 3125 = FREQ_HZ Hz
-
-        timer->refresh(); // Make register changes take effect
-        // timer->resume();                                                                  // Start
-    }
-
-    void Start_Timer()
-    {
-        timer->resume();
     }
 
     void Run()
     {
+        if (working_status == effects_status::off)
+            return;
         effect[current_effect_number]->Draw();
     }
 
+    ////////////   Effect select  ////////////
+    // Если текущий и выбранный эффект можно переключать, изменение принимается
     void Set_Effect(uint8_t number)
     {
-        current_effect_number = number;
+        if (working_status == effects_status::off)
+            return;
+        if (effect[number]->changable && effect[current_effect_number]->changable)
+            current_effect_number = number;
     }
 
     void Set_Effect_Next()
     {
-        if (current_effect_number == 0)
-        {
+        if (working_status == effects_status::off)
             return;
-        }
-        if (current_effect_number < COUNT_OF_EFFECTS - 2)
-        {
-            ++current_effect_number;
-        }
+        if (current_effect_number < NUMBER_OF_EFFECTS - 1)
+            Set_Effect(current_effect_number + 1);
     }
 
     void Set_Effect_Prev()
     {
-        if (current_effect_number == 0)
-        {
+        if (working_status == effects_status::off)
             return;
-        }
-        if (current_effect_number == 9)
-        {
-            // Будильник можно только выключить
+        if (current_effect_number > 0)
+            Set_Effect(current_effect_number - 1);
+    }
+
+    /////////////   Brightness   /////////////
+    // Если текущий эффект можно изменять по яркости, изменение принимается
+    void Set_Brigtness(uint8_t _brightness)
+    {
+        if (working_status == effects_status::off)
             return;
-        }
-        if (current_effect_number > 1)
-        {
-            --current_effect_number;
-        }
+        if (effect[current_effect_number]->dimmable)
+            strip.setBrightness(brightness = _brightness);
     }
 
     void Set_Brigtness_Next()
     {
+        if (working_status == effects_status::off)
+            return;
         if (brightness < 255)
-        {
-            brightness++;
-            Set_Brigtness(brightness);
-        }
+            Set_Brigtness(brightness + 1);
     }
 
     void Set_Brigtness_Prev()
     {
-        if (brightness > 0)
-        {
-            brightness--;
-            Set_Brigtness(brightness);
-        }
-    }
-
-    void Set_Brigtness(uint8_t _brightness)
-    {
-        if (current_effect_number == 9 or current_effect_number == 0)
-        { // Режим будильника
+        if (working_status == effects_status::off)
             return;
-        }
-        brightness = _brightness;
-        strip.setBrightness(brightness);
+        if (brightness > 0)
+            Set_Brigtness(brightness - 1);
     }
 
+    ///////////   Speed variable   ///////////
+    // Если текущий эффект можно изменять по скорости, изменение принимается
     void Set_Speed(uint8_t _speed)
     {
-        effect[current_effect_number]->Set_Speed(_speed);
-        // this->Set_Up_Timer();
-        // this->Start_Timer();
+        if (working_status == effects_status::off)
+            return;
+        if (effect[current_effect_number]->speed_variable)
+            effect[current_effect_number]->Set_Speed(_speed);
     }
 
     void Set_Speed_Prev()
     {
+        if (working_status == effects_status::off)
+            return;
         uint8_t speed = effect[current_effect_number]->Get_Speed();
         if (speed >= 7)
         {
@@ -625,6 +633,8 @@ public:
 
     void Set_Speed_Next()
     {
+        if (working_status == effects_status::off)
+            return;
         uint8_t speed = effect[current_effect_number]->Get_Speed();
         if (speed <= 213)
         {
@@ -633,33 +643,54 @@ public:
         }
     }
 
+    ///////////   Speed variable   ///////////
+    // Если текущий эффект можно изменять по скорости, изменение принимается
     void Set_Scale(uint16_t _scale)
     {
-        effect[current_effect_number]->Set_Scale(_scale);
+        if (working_status == effects_status::off)
+            return;
+        if (effect[current_effect_number]->scalable)
+            effect[current_effect_number]->Set_Scale(_scale);
     }
 
-    void On_Off()
+    void Manual_On_Off()
+    {
+        if (working_status == effects_status::on)
+        {
+            strip.setBrightness(0);
+            strip.show();
+            working_status = effects_status::off;
+            strip.show();
+        }
+        else if (working_status == effects_status::off)
+        {
+            working_status = effects_status::on;
+            strip.setBrightness(brightness);
+            strip.show();
+        } else if (working_status == effects_status::alarm)
+        {
+            Alarm_Off();
+        }
+    }
+
+    void Alarm_On()
     {
         if (current_effect_number != 0)
         {
-            if (current_effect_number != 9)
-                backup_effect_number = current_effect_number;
-            else
-            {
-                backup_effect_number = 3;
-            }
-            strip.setBrightness(0);
-            current_effect_number = 0; // Set_Effect(0)
-            this->Run();
-            timer->pause();
-        }
-        else
-        {
-            // this->Set_Up_Timer();
-            timer->resume();
-            current_effect_number = backup_effect_number;
-            strip.setBrightness(this->brightness);
-            // Serial.println(this->brightness);
+            backup_effect_number = current_effect_number;
+            current_effect_number = 0; // Выбрать эффект будильника
+            // TODO vTaskSuspend()
         }
     }
+
+    void Alarm_Off()
+    {
+        current_effect_number = backup_effect_number;
+        strip.setBrightness(0);
+        strip.show();
+        working_status = effects_status::off;
+        // TODO: vTaskResume()
+    }
 };
+
+#endif

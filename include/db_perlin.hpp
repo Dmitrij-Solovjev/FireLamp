@@ -47,7 +47,7 @@ namespace db {
     constexpr auto perlin(T x, T y, T z) -> T;
 }
 
-#ifdef DB_PERLIN_IMPL
+//#ifdef DB_PERLIN_IMPL
 
 /*
  * The implementation was based on this article:
@@ -271,7 +271,7 @@ template auto db::perlin<double>(double x) -> double;
 template auto db::perlin<double>(double x, double y) -> double;
 template auto db::perlin<double>(double x, double y, double z) -> double;
 
-#endif // DB_PERLIN_IMPL
+//#endif // DB_PERLIN_IMPL
 
 #endif // DB_PERLIN_HPP
 

@@ -1,130 +1,169 @@
-/**
- * Название: Огненная лампа
- * Дата: 14.08.2023
- * Функционал: передача и прием сообщений (SI4432)
- * Отображение эффектов, переключение кнопками
- *
- *
- *
+/* 28.11.24
+ * Firelamp with using FreeRTOS
+ * don't forget change INCLUDE_xTaskAbortDelay to 1
  */
 
 #include <Arduino.h>
-#include "RadioLib.h"
-#include "Effects.h"
 #include "button.h"
+#include "Effects.h"
+#include <STM32FreeRTOS.h>
 
-#define NAME (String) "Часы"
+// Define the LED pin is attached
+#define LED_PIN LED_BUILTIN
+#define BUT1_PIN PB8
+#define BUT2_PIN PB9
+#define LED_MATRIX_PIN PB6
 
-RadioLib RL22;
-HardwareTimer timer_effect(TIM2);
-Effects MyEff(&timer_effect);
+static bool flag_to_interrupt_button_up = false;
+static bool flag_to_interrupt_button_down = false;
 
-HardwareTimer timer_button0(TIM9);
-HardwareTimer timer_button1(TIM1);
+Effects eff;
+TaskHandle_t OnTimerTaskHandleButton_UP;
+TaskHandle_t OnTimerTaskHandleButton_DOWN;
 
-Button button0(PA0, &timer_button0, "PA0");
-Button button1(PA1, &timer_button1, "PA1");
+////////////////////////////////////////////////////////////////////////////////////////
+//                                   Buttons section                                  //
+////////////////////////////////////////////////////////////////////////////////////////
 
-Virtual_Button on_off_button(&button0, &button1, &MyEff);
+static void OnSinglePressButtonDown(void *arg)
+{
+  UNUSED(arg);
+  eff.Set_Effect_Prev();
+}
+
+static void OnLongPressButtonDown(void *arg)
+{
+  UNUSED(arg);
+  eff.Set_Brigtness_Prev();
+}
+
+static void OnDoublePressButtonDown(void *arg)
+{
+  UNUSED(arg);
+  eff.Set_Speed_Prev();
+}
+
+static void OnSinglePressButtonUp(void *arg)
+{
+  UNUSED(arg);
+  eff.Set_Effect_Next();
+}
+
+static void OnLongPressButtonUp(void *arg)
+{
+  UNUSED(arg);
+  eff.Set_Brigtness_Next();
+}
+
+static void OnDoublePressButtonUp(void *arg)
+{
+  UNUSED(arg);
+  eff.Set_Speed_Next();
+}
+
+Button Button_DOWN(BUT1_PIN, OnSinglePressButtonDown, OnDoublePressButtonDown, OnLongPressButtonDown);
+Button Button_UP(BUT2_PIN, OnSinglePressButtonUp, OnDoublePressButtonUp, OnLongPressButtonUp);
+
+static void OnOffFunction(void *arg)
+{
+  UNUSED(arg);
+  eff.Manual_On_Off();
+}
+
+Virtual_Button Button_ON_OFF(&Button_DOWN, &Button_UP, OnOffFunction,
+                             OnTimerTaskHandleButton_UP,
+                             OnTimerTaskHandleButton_DOWN);
+
+////////////////////////////////////////////////////////////////////////////////////////
+//                                    Tasks section                                   //
+////////////////////////////////////////////////////////////////////////////////////////
+
+static void taskLEDMatrixUpgrade(void *arg)
+{
+  UNUSED(arg);
+
+  while (1)
+  {
+    eff.Run();
+    vTaskDelay((16L * configTICK_RATE_HZ) / 1000L);
+  }
+}
+
+static void taskOnTimerIterruptButton_DOWN(void *arg)
+{
+  UNUSED(arg);
+  while (1)
+    Button_DOWN.OnTimerIterrupt(OnTimerTaskHandleButton_DOWN);
+}
+
+static void taskOnTimerIterruptButton_UP(void *arg)
+{
+  UNUSED(arg);
+  while (1)
+    Button_UP.OnTimerIterrupt(OnTimerTaskHandleButton_UP);
+}
+
+static void onButtonInterrupt_DOWN()
+{
+  flag_to_interrupt_button_down = true;
+}
+
+static void onButtonInterrupt_UP()
+{
+  flag_to_interrupt_button_up = true;
+}
+
+static void taskInterruptsToTasks(void *arg)
+{
+  UNUSED(arg);
+  while (1)
+  {
+    if (flag_to_interrupt_button_up)
+    {
+      Button_UP.OnPressInterrupt(OnTimerTaskHandleButton_UP);
+      flag_to_interrupt_button_up = false;
+    }
+    if (flag_to_interrupt_button_down)
+    {
+      Button_DOWN.OnPressInterrupt(OnTimerTaskHandleButton_DOWN);
+      flag_to_interrupt_button_down = false;
+    }
+    vTaskDelay(1);
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+//                                        Setup                                       //
+////////////////////////////////////////////////////////////////////////////////////////
 void setup()
 {
-	Serial.begin(9600);
-	pinMode(PA2, OUTPUT);
-	pinMode(LED_BUILTIN, OUTPUT);
+  Serial.begin(9600);
+  portBASE_TYPE s1, s2, s3, s4;
 
-	// Defaults after init are 1DBM, 446.0MHz, 0.05MHz AFC pull-in, modulation FSK_Rb2_4Fd36
-	RL22.init();
-	button0.init([]()
-				 { button0.Clarify_Status_Single(); },
-				 []()
-				 { button0.Clarify_Status_Double(); },
-				 []()
-				 { button0.Clarify_Status_Long(); },
-				 []() { // одиночное нажатие
-					 MyEff.Set_Effect_Prev();
-				 },
-				 []() { // двойное нажатие
-					 MyEff.Set_Brigtness_Prev();
-				 },
-				 []() {						 // долгое нажатие
-					 MyEff.Set_Speed_Prev(); // digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-				 },
-				 []() { // Вызов функции в случае нажатия на кнопку
-					 button0.Detect_Press_Type();
-				 });
+  attachInterrupt(Button_DOWN.pin, onButtonInterrupt_DOWN, CHANGE);
+  attachInterrupt(Button_UP.pin, onButtonInterrupt_UP, CHANGE);
 
-	button1.init([]()
-				 { button1.Clarify_Status_Single(); },
-				 []()
-				 { button1.Clarify_Status_Double(); },
-				 []()
-				 { button1.Clarify_Status_Long(); },
-				 []() { // одиночное нажатие
-					 MyEff.Set_Effect_Next();
-				 },
-				 []() { // двойное нажатие
-					 MyEff.Set_Brigtness_Next();
-				 },
-				 []() {						 // долгое нажатие
-					 MyEff.Set_Speed_Next(); // digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-				 },
-				 []() { // Вызов функции в случае нажатия на кнопку
-					 button1.Detect_Press_Type();
-				 });
+  s1 = xTaskCreate(taskLEDMatrixUpgrade, NULL, configMINIMAL_STACK_SIZE, NULL, 3, NULL);
+  s2 = xTaskCreate(taskOnTimerIterruptButton_DOWN, NULL, configMINIMAL_STACK_SIZE, NULL, 3, &OnTimerTaskHandleButton_DOWN);
+  s3 = xTaskCreate(taskOnTimerIterruptButton_UP, NULL, configMINIMAL_STACK_SIZE, NULL, 3, &OnTimerTaskHandleButton_UP);
+  s4 = xTaskCreate(taskInterruptsToTasks, NULL, configMINIMAL_STACK_SIZE, NULL, 3, NULL);
 
-	timer_effect.attachInterrupt([]()
-								 { MyEff.Run(); });
+  vTaskSuspend(OnTimerTaskHandleButton_DOWN);
+  vTaskSuspend(OnTimerTaskHandleButton_UP);
 
-	for (int i = 0; i < 5; i++)
-	{
-		digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-		// digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-		delay(250);
-	}
+  Button_UP.Set_Parent(&Button_ON_OFF);
+  Button_DOWN.Set_Parent(&Button_ON_OFF);
 
-	MyEff.Start_Timer();
+  // check for creation errors
+  if (s1 != pdPASS || s2 != pdPASS || s3 != pdPASS || s4 != pdPASS)
+  {
+    Serial.println(F("Creation problem"));
+    while (1);
+  }
+
+  vTaskStartScheduler();
+  Serial.println("Insufficient RAM");
+  while (1);
 }
 
-void loop()
-{
-
-	// если есть доступные данные
-	String my_text = "";
-	if (Serial.available())
-	{
-		char my_char = 'a';
-		while (my_char != '\n')
-			if (Serial.available())
-			{
-				my_char = (char)(Serial.read());
-				my_text += my_char; // read the incoming data as string
-				Serial.print(my_char);
-			}
-
-		my_text = my_text.substring(0, my_text.length() - 2);
-		my_text.trim();
-
-		//  отсылаем то, что получили
-
-		Serial.println("(" + NAME + ")-->Отправка:  " + my_text);
-		RL22.SendMessage(my_text);
-	}
-
-	///////////////////////////////////////////////////////////////////////////
-	// Проверка наличия новых сообщений
-	uint8_t buf[RH_RF22_MAX_MESSAGE_LEN] = {};
-
-	switch (RL22.GetMessage(buf))
-	{
-	case 2:
-		Serial.println("(" + NAME + ")<--Пришедший пакет ПОЛУЧЕН: ");
-		Serial.println((char *)buf);
-		break;
-	case 1:
-		Serial.println("(" + NAME + ")<--Пришедший пакет НЕ ПОЛУЧЕН");
-		break;
-	case 0:
-		// Сообщений нет
-		break;
-	}
-}
+void loop() {}
