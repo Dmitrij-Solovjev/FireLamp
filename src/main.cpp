@@ -4,9 +4,10 @@
  */
 
 #include <Arduino.h>
-#include "button.h"
-#include "Effects.h"
 #include <STM32FreeRTOS.h>
+
+#include "Effects.h"
+#include "button.h"
 
 // Define the LED pin is attached
 #define LED_PIN LED_BUILTIN
@@ -25,51 +26,47 @@ TaskHandle_t OnTimerTaskHandleButton_DOWN;
 //                                   Buttons section                                  //
 ////////////////////////////////////////////////////////////////////////////////////////
 
-static void OnSinglePressButtonDown(void *arg)
-{
+static void OnSinglePressButtonDown(void *arg) {
   UNUSED(arg);
   eff.Set_Effect_Prev();
 }
 
-static void OnLongPressButtonDown(void *arg)
-{
+static void OnLongPressButtonDown(void *arg) {
   UNUSED(arg);
   eff.Set_Brigtness_Prev();
 }
 
-static void OnDoublePressButtonDown(void *arg)
-{
+static void OnDoublePressButtonDown(void *arg) {
   UNUSED(arg);
   eff.Set_Speed_Prev();
 }
 
-static void OnSinglePressButtonUp(void *arg)
-{
+static void OnSinglePressButtonUp(void *arg) {
   UNUSED(arg);
   eff.Set_Effect_Next();
 }
 
-static void OnLongPressButtonUp(void *arg)
-{
+static void OnLongPressButtonUp(void *arg) {
   UNUSED(arg);
   eff.Set_Brigtness_Next();
 }
 
-static void OnDoublePressButtonUp(void *arg)
-{
+static void OnDoublePressButtonUp(void *arg) {
   UNUSED(arg);
   eff.Set_Speed_Next();
 }
 
-Button Button_DOWN(BUT1_PIN, OnSinglePressButtonDown, OnDoublePressButtonDown, OnLongPressButtonDown);
-Button Button_UP(BUT2_PIN, OnSinglePressButtonUp, OnDoublePressButtonUp, OnLongPressButtonUp);
+Button Button_DOWN(BUT1_PIN, OnSinglePressButtonDown, OnDoublePressButtonDown,
+                   OnLongPressButtonDown);
+Button Button_UP(BUT2_PIN, OnSinglePressButtonUp, OnDoublePressButtonUp,
+                 OnLongPressButtonUp);
 
-static void OnOffFunction(void *arg)
-{
+static void OnOffFunction(void *arg) {
   UNUSED(arg);
   eff.Manual_On_Off();
 }
 
+// Виртуальная кнопка, вызываемая при одновременном нажатии 2 физических кнопок
 Virtual_Button Button_ON_OFF(&Button_DOWN, &Button_UP, OnOffFunction,
                              OnTimerTaskHandleButton_UP,
                              OnTimerTaskHandleButton_DOWN);
@@ -78,53 +75,43 @@ Virtual_Button Button_ON_OFF(&Button_DOWN, &Button_UP, OnOffFunction,
 //                                    Tasks section                                   //
 ////////////////////////////////////////////////////////////////////////////////////////
 
-static void taskLEDMatrixUpgrade(void *arg)
-{
+static void taskLEDMatrixUpgrade(void *arg) {
   UNUSED(arg);
 
-  while (1)
-  {
+  while (1) {
     eff.Run();
     vTaskDelay((16L * configTICK_RATE_HZ) / 1000L);
   }
 }
 
-static void taskOnTimerIterruptButton_DOWN(void *arg)
-{
+// Задачи, связанные с периодической проверкой состояния кнопок (нажата или нет)
+// Вызывают Button.OnTimerIterrupt, в котором, в зависимости от условия,
+// выставляется задержка. (например 25 мс, если длительное удержание)
+static void taskOnTimerIterruptButton_DOWN(void *arg) {
   UNUSED(arg);
-  while (1)
-    Button_DOWN.OnTimerIterrupt(OnTimerTaskHandleButton_DOWN);
+  while (1) Button_DOWN.OnTimerIterrupt(OnTimerTaskHandleButton_DOWN);
 }
 
-static void taskOnTimerIterruptButton_UP(void *arg)
-{
+static void taskOnTimerIterruptButton_UP(void *arg) {
   UNUSED(arg);
-  while (1)
-    Button_UP.OnTimerIterrupt(OnTimerTaskHandleButton_UP);
+  while (1) Button_UP.OnTimerIterrupt(OnTimerTaskHandleButton_UP);
 }
 
-static void onButtonInterrupt_DOWN()
-{
-  flag_to_interrupt_button_down = true;
-}
+// Обработчики прерываний с ножек микроконтроллера
+static void onButtonInterrupt_DOWN() { flag_to_interrupt_button_down = true; }
 
-static void onButtonInterrupt_UP()
-{
-  flag_to_interrupt_button_up = true;
-}
+static void onButtonInterrupt_UP() { flag_to_interrupt_button_up = true; }
 
-static void taskInterruptsToTasks(void *arg)
-{
+// Задача проверяющая прерывания с ножек микроконтроллера. К сожалению, напрямую
+// из прерывания запустить задачу нельзя.
+static void taskInterruptsToTasks(void *arg) {
   UNUSED(arg);
-  while (1)
-  {
-    if (flag_to_interrupt_button_up)
-    {
+  while (1) {
+    if (flag_to_interrupt_button_up) {
       Button_UP.OnPressInterrupt(OnTimerTaskHandleButton_UP);
       flag_to_interrupt_button_up = false;
     }
-    if (flag_to_interrupt_button_down)
-    {
+    if (flag_to_interrupt_button_down) {
       Button_DOWN.OnPressInterrupt(OnTimerTaskHandleButton_DOWN);
       flag_to_interrupt_button_down = false;
     }
@@ -135,18 +122,22 @@ static void taskInterruptsToTasks(void *arg)
 ////////////////////////////////////////////////////////////////////////////////////////
 //                                        Setup                                       //
 ////////////////////////////////////////////////////////////////////////////////////////
-void setup()
-{
+void setup() {
   Serial.begin(9600);
   portBASE_TYPE s1, s2, s3, s4;
 
   attachInterrupt(Button_DOWN.pin, onButtonInterrupt_DOWN, CHANGE);
   attachInterrupt(Button_UP.pin, onButtonInterrupt_UP, CHANGE);
 
-  s1 = xTaskCreate(taskLEDMatrixUpgrade, NULL, configMINIMAL_STACK_SIZE, NULL, 3, NULL);
-  s2 = xTaskCreate(taskOnTimerIterruptButton_DOWN, NULL, configMINIMAL_STACK_SIZE, NULL, 3, &OnTimerTaskHandleButton_DOWN);
-  s3 = xTaskCreate(taskOnTimerIterruptButton_UP, NULL, configMINIMAL_STACK_SIZE, NULL, 3, &OnTimerTaskHandleButton_UP);
-  s4 = xTaskCreate(taskInterruptsToTasks, NULL, configMINIMAL_STACK_SIZE, NULL, 3, NULL);
+  s1 = xTaskCreate(taskLEDMatrixUpgrade, NULL, configMINIMAL_STACK_SIZE, NULL,
+                   3, NULL);
+  s2 = xTaskCreate(taskOnTimerIterruptButton_DOWN, NULL,
+                   configMINIMAL_STACK_SIZE, NULL, 3,
+                   &OnTimerTaskHandleButton_DOWN);
+  s3 = xTaskCreate(taskOnTimerIterruptButton_UP, NULL, configMINIMAL_STACK_SIZE,
+                   NULL, 3, &OnTimerTaskHandleButton_UP);
+  s4 = xTaskCreate(taskInterruptsToTasks, NULL, configMINIMAL_STACK_SIZE, NULL,
+                   3, NULL);
 
   vTaskSuspend(OnTimerTaskHandleButton_DOWN);
   vTaskSuspend(OnTimerTaskHandleButton_UP);
@@ -155,8 +146,7 @@ void setup()
   Button_DOWN.Set_Parent(&Button_ON_OFF);
 
   // check for creation errors
-  if (s1 != pdPASS || s2 != pdPASS || s3 != pdPASS || s4 != pdPASS)
-  {
+  if (s1 != pdPASS || s2 != pdPASS || s3 != pdPASS || s4 != pdPASS) {
     Serial.println(F("Creation problem"));
     while (1);
   }
