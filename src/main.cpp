@@ -1,6 +1,6 @@
 /* 28.11.24
  * Firelamp with using FreeRTOS
- * don't forget change INCLUDE_xTaskAbortDelay to 1
+ * don't forget change INCLUDE_xTaskAbortDelay to 1 in FreeRTOSConfig.h
  */
 
 #include <Arduino.h>
