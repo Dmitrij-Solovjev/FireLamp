@@ -11,9 +11,9 @@
 
 // Define the LED pin is attached
 #define LED_PIN LED_BUILTIN
-#define BUT1_PIN PB8
-#define BUT2_PIN PB9
-#define LED_MATRIX_PIN PB6
+#define BUT1_PIN PB14
+#define BUT2_PIN PB15
+#define LED_MATRIX_PIN PB3 
 
 static bool flag_to_interrupt_button_up = false;
 static bool flag_to_interrupt_button_down = false;
@@ -122,8 +122,12 @@ static void taskInterruptsToTasks(void *arg) {
 ////////////////////////////////////////////////////////////////////////////////////////
 //                                        Setup                                       //
 ////////////////////////////////////////////////////////////////////////////////////////
+
 void setup() {
-  Serial.begin(9600);
+  delay(1000);
+  Serial1.begin(9600);
+  pinMode(PB4, OUTPUT);
+  digitalWrite(PB4, LOW);
   portBASE_TYPE s1, s2, s3, s4;
 
   attachInterrupt(Button_DOWN.pin, onButtonInterrupt_DOWN, CHANGE);
@@ -144,15 +148,16 @@ void setup() {
 
   Button_UP.Set_Parent(&Button_ON_OFF);
   Button_DOWN.Set_Parent(&Button_ON_OFF);
+  Serial1.println("Start!");
 
   // check for creation errors
   if (s1 != pdPASS || s2 != pdPASS || s3 != pdPASS || s4 != pdPASS) {
-    Serial.println(F("Creation problem"));
+    Serial1.println(F("Creation problem"));
     while (1);
   }
 
   vTaskStartScheduler();
-  Serial.println("Insufficient RAM");
+  Serial1.println("Insufficient RAM");
   while (1);
 }
 
