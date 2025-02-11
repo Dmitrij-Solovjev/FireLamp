@@ -444,7 +444,7 @@ class Effects {
   uint8_t current_effect_number, backup_effect_number, brightness;
 
  public:
-  Effects(size_t default_brightness = 25,
+  Effects(size_t default_brightness = 5,
           size_t effects_count = NUMBER_OF_EFFECTS,
           size_t default_effect_number = 3)
       : brightness(default_brightness),

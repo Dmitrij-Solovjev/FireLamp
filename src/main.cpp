@@ -2,6 +2,11 @@
  * Firelamp with using FreeRTOS
  * don't forget change INCLUDE_xTaskAbortDelay to 1 in FreeRTOSConfig.h
  */
+// Define the LED pin is attached
+#define LED_PIN PB4
+#define BUT1_PIN PB14
+#define BUT2_PIN PB15
+#define LED_MATRIX_PIN PB3
 
 #include <Arduino.h>
 #include <STM32FreeRTOS.h>
@@ -9,11 +14,7 @@
 #include "Effects.h"
 #include "button.h"
 
-// Define the LED pin is attached
-#define LED_PIN LED_BUILTIN
-#define BUT1_PIN PB14
-#define BUT2_PIN PB15
-#define LED_MATRIX_PIN PB3 
+
 
 static bool flag_to_interrupt_button_up = false;
 static bool flag_to_interrupt_button_down = false;
@@ -124,10 +125,10 @@ static void taskInterruptsToTasks(void *arg) {
 ////////////////////////////////////////////////////////////////////////////////////////
 
 void setup() {
-  delay(1000);
-  Serial1.begin(9600);
-  pinMode(PB4, OUTPUT);
-  digitalWrite(PB4, LOW);
+  delay(10000);
+  Serial1.begin(115200); 
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
   portBASE_TYPE s1, s2, s3, s4;
 
   attachInterrupt(Button_DOWN.pin, onButtonInterrupt_DOWN, CHANGE);
@@ -155,6 +156,7 @@ void setup() {
     Serial1.println(F("Creation problem"));
     while (1);
   }
+  digitalWrite(LED_PIN, HIGH);
 
   vTaskStartScheduler();
   Serial1.println("Insufficient RAM");
